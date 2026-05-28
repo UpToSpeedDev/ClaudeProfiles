@@ -141,7 +141,10 @@ final class ProfileLauncher {
         }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
-        config.createsNewApplicationInstance = false
+        // If only isolated-profile Claudes are running, openApplication would normally
+        // re-activate one of those instead of starting a fresh instance against the
+        // default data dir. Force a new instance so the default profile actually opens.
+        config.createsNewApplicationInstance = true
         NSWorkspace.shared.openApplication(at: appURL, configuration: config) { [weak self] _, error in
             if let error {
                 NSLog("Default Claude launch failed: \(error.localizedDescription)")

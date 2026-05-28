@@ -69,10 +69,15 @@ private struct MenuBarContent: View {
                     }
                 } label: {
                     Label {
-                        Text(launcher.isRunning(profile) ? "\(profile.name)  ●" : profile.name)
+                        Text(profile.name)
                     } icon: {
-                        Image(systemName: "circle.fill")
-                            .foregroundStyle(profile.tint.color)
+                        // NSMenu strips foregroundStyle from SF Symbols (template rendering),
+                        // so use a non-template NSImage to keep the tint visible.
+                        // Shape doubles as the running indicator: triangle = running, dot = idle.
+                        Image(nsImage: Self.tintedStatusImage(
+                            color: profile.tint.color,
+                            running: launcher.isRunning(profile)
+                        ))
                     }
                 }
             }
@@ -95,5 +100,26 @@ private struct MenuBarContent: View {
             NSApp.terminate(nil)
         }
         .keyboardShortcut("q")
+    }
+
+    fileprivate static func tintedStatusImage(color: Color, running: Bool, size: CGFloat = 12) -> NSImage {
+        let pixelSize = NSSize(width: size, height: size)
+        let image = NSImage(size: pixelSize, flipped: false) { rect in
+            NSColor(color).setFill()
+            let path: NSBezierPath
+            if running {
+                path = NSBezierPath()
+                path.move(to: NSPoint(x: rect.minX, y: rect.maxY))
+                path.line(to: NSPoint(x: rect.minX, y: rect.minY))
+                path.line(to: NSPoint(x: rect.maxX, y: rect.midY))
+                path.close()
+            } else {
+                path = NSBezierPath(ovalIn: rect)
+            }
+            path.fill()
+            return true
+        }
+        image.isTemplate = false
+        return image
     }
 }
