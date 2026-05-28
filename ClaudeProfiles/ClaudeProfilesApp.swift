@@ -5,11 +5,13 @@ import SwiftUI
 struct ClaudeProfilesApp: App {
     @State private var store = ProfileStore()
     @State private var launcher = ProfileLauncher()
+    @State private var updates = UpdateChecker()
 
     var body: some Scene {
         Window("Claude Profiles", id: "main") {
-            RootView(store: store, launcher: launcher)
+            RootView(store: store, launcher: launcher, updates: updates)
                 .frame(minWidth: 720, minHeight: 460)
+                .task { updates.checkIfDue() }
         }
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -19,6 +21,10 @@ struct ClaudeProfilesApp: App {
                 .keyboardShortcut("n", modifiers: [.command])
             }
             CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updates.checkNow()
+                    NotificationCenter.default.post(name: .requestUpdateCheck, object: nil)
+                }
                 Button("Open Data Folder") {
                     NSWorkspace.shared.open(Paths.appSupportRoot)
                 }
@@ -26,7 +32,7 @@ struct ClaudeProfilesApp: App {
         }
 
         MenuBarExtra {
-            MenuBarContent(store: store, launcher: launcher)
+            MenuBarContent(store: store, launcher: launcher, updates: updates)
         } label: {
             Image(systemName: "person.2.crop.square.stack.fill")
         }
@@ -36,11 +42,13 @@ struct ClaudeProfilesApp: App {
 
 extension Notification.Name {
     static let requestNewProfile = Notification.Name("ClaudeProfiles.requestNewProfile")
+    static let requestUpdateCheck = Notification.Name("ClaudeProfiles.requestUpdateCheck")
 }
 
 private struct MenuBarContent: View {
     @Bindable var store: ProfileStore
     @Bindable var launcher: ProfileLauncher
+    @Bindable var updates: UpdateChecker
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -67,6 +75,13 @@ private struct MenuBarContent: View {
                             .foregroundStyle(profile.tint.color)
                     }
                 }
+            }
+            Divider()
+        }
+
+        if case .updateAvailable(let version, let url) = updates.state {
+            Button("Update available — v\(version)") {
+                NSWorkspace.shared.open(url)
             }
             Divider()
         }

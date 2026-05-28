@@ -37,6 +37,20 @@ open build/Release/ClaudeProfiles.app   # adjust to -derivedDataPath if you set 
 
 Or open `ClaudeProfiles.xcodeproj` in Xcode and ⌘R.
 
+## Updates
+
+On launch (at most once every 24 hours) Claude Profiles checks the
+[GitHub Releases API](https://api.github.com/repos/UpToSpeedDev/ClaudeProfiles/releases/latest)
+for a newer tag than the running `CFBundleShortVersionString`. If one
+exists, a banner appears in the main window and a "Update available"
+item appears in the menu-bar extra. Clicking either opens the GitHub
+release page — installation is manual (download the new build and
+replace the app). Trigger a fresh check any time from the **Claude
+Profiles → Check for Updates…** menu item.
+
+No telemetry is sent. The only network call is the unauthenticated
+GitHub API request above.
+
 ## Caveats
 
 - All running Claude instances share one Dock icon (same bundle id).
