@@ -11,7 +11,10 @@ struct ClaudeProfilesApp: App {
         Window("Claude Profiles", id: "main") {
             RootView(store: store, launcher: launcher, updates: updates)
                 .frame(minWidth: 720, minHeight: 460)
-                .task { updates.checkIfDue() }
+                .task {
+                    launcher.bind(store: store)
+                    updates.checkIfDue()
+                }
         }
         .commands {
             CommandGroup(replacing: .newItem) {

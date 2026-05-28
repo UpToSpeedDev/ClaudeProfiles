@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import Observation
 
@@ -28,17 +29,28 @@ final class ProfileLauncher {
     private(set) var externalClaudeRunning: Bool = false
 
     @ObservationIgnored private var processes: [UUID: Process] = [:]
+    /// Pids for profile instances we discovered by scanning running Claudes (e.g. orphans
+    /// from a previous app session). Kept separate so we know we don't own a `Process`.
+    @ObservationIgnored private var adoptedPids: [UUID: pid_t] = [:]
     @ObservationIgnored private var externalClaude: NSRunningApplication?
     @ObservationIgnored private var workspaceObservers: [NSObjectProtocol] = []
+    @ObservationIgnored private weak var store: ProfileStore?
 
     init() {
         registerWorkspaceObservers()
-        refreshExternalClaude()
+    }
+
+    /// Called by the App once the store is available so the launcher can classify
+    /// running Claudes by matching `--user-data-dir=` against known profile paths.
+    func bind(store: ProfileStore) {
+        self.store = store
+        rescanRunningClaudes()
     }
 
     func isRunning(_ profile: Profile) -> Bool {
         if profile.isDefault { return externalClaudeRunning }
-        return runningIDs.contains(profile.id)
+        if let proc = processes[profile.id], proc.isRunning { return true }
+        return adoptedPids[profile.id] != nil
     }
 
     /// Launches a Claude instance for the profile, or activates the existing one.
@@ -56,18 +68,23 @@ final class ProfileLauncher {
             externalClaude?.activate(options: [.activateAllWindows])
             return
         }
-        guard let pid = processes[profile.id]?.processIdentifier else { return }
-        activate(pid: pid)
+        if let pid = runningPid(for: profile) { activate(pid: pid) }
     }
 
-    /// Send SIGTERM to the child Claude process. macOS will close it gracefully.
+    /// Send SIGTERM to the profile's Claude process. macOS will close it gracefully.
     func quit(_ profile: Profile) {
         if profile.isDefault {
             externalClaude?.terminate()
             return
         }
-        guard let proc = processes[profile.id], proc.isRunning else { return }
-        proc.terminate()
+        if let proc = processes[profile.id], proc.isRunning {
+            proc.terminate()
+            return
+        }
+        if let pid = adoptedPids[profile.id],
+           let app = NSRunningApplication(processIdentifier: pid) {
+            app.terminate()
+        }
     }
 
     /// Terminate everything we spawned. Not called on app quit by default.
@@ -77,9 +94,16 @@ final class ProfileLauncher {
         }
     }
 
+    private func runningPid(for profile: Profile) -> pid_t? {
+        if let proc = processes[profile.id], proc.isRunning {
+            return proc.processIdentifier
+        }
+        return adoptedPids[profile.id]
+    }
+
     private func launchIsolated(_ profile: Profile, store: ProfileStore) throws {
-        if let existing = processes[profile.id], existing.isRunning {
-            activate(pid: existing.processIdentifier)
+        if let pid = runningPid(for: profile) {
+            activate(pid: pid)
             return
         }
 
@@ -114,8 +138,8 @@ final class ProfileLauncher {
                 guard let self else { return }
                 if let entry = self.processes.first(where: { $0.value.processIdentifier == pid }) {
                     self.processes.removeValue(forKey: entry.key)
-                    self.runningIDs.remove(entry.key)
                 }
+                self.rescanRunningClaudes()
             }
         }
 
@@ -149,7 +173,7 @@ final class ProfileLauncher {
             if let error {
                 NSLog("Default Claude launch failed: \(error.localizedDescription)")
             }
-            Task { @MainActor in self?.refreshExternalClaude() }
+            Task { @MainActor in self?.rescanRunningClaudes() }
         }
         store.markLaunched(profile)
     }
@@ -168,7 +192,7 @@ final class ProfileLauncher {
         ) { [weak self] note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.bundleIdentifier == ClaudeAppLocator.bundleID else { return }
-            Task { @MainActor in self?.refreshExternalClaude() }
+            Task { @MainActor in self?.rescanRunningClaudes() }
         }
         let termObs = nc.addObserver(
             forName: NSWorkspace.didTerminateApplicationNotification,
@@ -177,20 +201,101 @@ final class ProfileLauncher {
         ) { [weak self] note in
             guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                   app.bundleIdentifier == ClaudeAppLocator.bundleID else { return }
-            Task { @MainActor in self?.refreshExternalClaude() }
+            Task { @MainActor in self?.rescanRunningClaudes() }
         }
         workspaceObservers = [launchObs, termObs]
     }
 
-    /// The "external" Claude is any running Claude.app instance whose pid we did not spawn.
-    /// That distinguishes the user-launched (default data-dir) instance from per-profile
-    /// instances we started with `--user-data-dir`.
-    private func refreshExternalClaude() {
-        let ourPids = Set(processes.values.map { $0.processIdentifier })
-        let candidate = NSRunningApplication
-            .runningApplications(withBundleIdentifier: ClaudeAppLocator.bundleID)
-            .first { !ourPids.contains($0.processIdentifier) }
-        externalClaude = candidate
-        externalClaudeRunning = candidate != nil
+    /// Walk every running Claude.app, read its launch arguments, and route each instance:
+    /// - matches a known profile's `--user-data-dir` ⇒ that profile is running (adopt the pid).
+    /// - no `--user-data-dir`, or pointed at Claude's default data dir ⇒ this is the "external"
+    ///   default Claude.
+    /// - anything else (e.g. a deleted profile) is ignored.
+    private func rescanRunningClaudes() {
+        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: ClaudeAppLocator.bundleID)
+        let defaultDir = Paths.defaultClaudeDataDirectory.standardizedFileURL.path
+        let profilesByDir: [String: UUID] = Dictionary(
+            (store?.profiles ?? [])
+                .filter { !$0.isDefault }
+                .map { ($0.dataDirectoryURL().standardizedFileURL.path, $0.id) },
+            uniquingKeysWith: { first, _ in first }
+        )
+
+        var newAdopted: [UUID: pid_t] = [:]
+        var externalCandidate: NSRunningApplication?
+
+        for app in apps {
+            let pid = app.processIdentifier
+
+            // Already owned via a Process we spawned — no need to inspect argv.
+            if processes.contains(where: { $0.value.processIdentifier == pid }) {
+                continue
+            }
+
+            let args = Self.processArguments(pid: pid) ?? []
+            let dataDir = Self.userDataDir(in: args)?.standardizedFileURL.path
+
+            if let dataDir, let profileID = profilesByDir[dataDir] {
+                newAdopted[profileID] = pid
+            } else if dataDir == nil || dataDir == defaultDir {
+                if externalCandidate == nil { externalCandidate = app }
+            }
+        }
+
+        adoptedPids = newAdopted
+        externalClaude = externalCandidate
+        externalClaudeRunning = externalCandidate != nil
+
+        let spawnedRunning = processes.compactMap { $0.value.isRunning ? $0.key : nil }
+        runningIDs = Set(spawnedRunning).union(newAdopted.keys)
+    }
+
+    /// Read another process's argv via `sysctl(KERN_PROCARGS2)`. Returns nil if the
+    /// process is gone or we don't have permission.
+    private static func processArguments(pid: pid_t) -> [String]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        let probe = mib.withUnsafeMutableBufferPointer {
+            sysctl($0.baseAddress, UInt32($0.count), nil, &size, nil, 0)
+        }
+        if probe != 0 || size <= MemoryLayout<Int32>.size { return nil }
+
+        var buffer = [UInt8](repeating: 0, count: size)
+        let read = mib.withUnsafeMutableBufferPointer { mibPtr in
+            buffer.withUnsafeMutableBufferPointer { bufPtr in
+                sysctl(mibPtr.baseAddress, UInt32(mibPtr.count), bufPtr.baseAddress, &size, nil, 0)
+            }
+        }
+        if read != 0 { return nil }
+
+        // Layout: [Int32 argc][exec path NUL-terminated][NUL padding][argv[0]\0]...[argv[argc-1]\0][envp...]
+        let argc = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
+        var idx = MemoryLayout<Int32>.size
+        while idx < buffer.count && buffer[idx] != 0 { idx += 1 }      // skip exec path
+        while idx < buffer.count && buffer[idx] == 0 { idx += 1 }      // skip NUL padding
+
+        var args: [String] = []
+        var collected: Int32 = 0
+        while collected < argc && idx < buffer.count {
+            var end = idx
+            while end < buffer.count && buffer[end] != 0 { end += 1 }
+            if let s = String(bytes: buffer[idx..<end], encoding: .utf8) {
+                args.append(s)
+            }
+            idx = end + 1
+            collected += 1
+        }
+        return args
+    }
+
+    private static func userDataDir(in args: [String]) -> URL? {
+        let key = "--user-data-dir"
+        for arg in args where arg.hasPrefix("\(key)=") {
+            return URL(fileURLWithPath: String(arg.dropFirst(key.count + 1)))
+        }
+        for (i, arg) in args.enumerated() where arg == key && i + 1 < args.count {
+            return URL(fileURLWithPath: args[i + 1])
+        }
+        return nil
     }
 }
