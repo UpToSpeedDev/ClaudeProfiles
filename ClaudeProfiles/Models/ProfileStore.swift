@@ -8,6 +8,14 @@ final class ProfileStore {
 
     init() {
         load()
+        ensureDefaultProfile()
+    }
+
+    private func ensureDefaultProfile() {
+        if !profiles.contains(where: { $0.isDefault }) {
+            profiles.insert(Profile.makeDefault(), at: 0)
+            save()
+        }
     }
 
     func add(name: String, tint: Profile.Tint) -> Profile {
@@ -46,7 +54,9 @@ final class ProfileStore {
     }
 
     /// Removes the profile. If `removeData` is true, the on-disk data directory is moved to Trash.
+    /// The built-in default profile cannot be deleted.
     func delete(_ profile: Profile, removeData: Bool) {
+        guard !profile.isDefault else { return }
         profiles.removeAll { $0.id == profile.id }
         save()
         if removeData {

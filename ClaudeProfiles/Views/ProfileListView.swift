@@ -27,11 +27,13 @@ struct ProfileListView: View {
                         Button("Reveal Data in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([profile.dataDirectoryURL()])
                         }
-                        Button("Reveal Log in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([profile.logFileURL()])
+                        if !profile.isDefault {
+                            Button("Reveal Log in Finder") {
+                                NSWorkspace.shared.activateFileViewerSelecting([profile.logFileURL()])
+                            }
+                            Divider()
+                            Button("Delete…", role: .destructive) { onDelete(profile) }
                         }
-                        Divider()
-                        Button("Delete…", role: .destructive) { onDelete(profile) }
                     }
             }
         }

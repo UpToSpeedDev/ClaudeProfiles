@@ -86,6 +86,7 @@ struct RootView: View {
     }
 
     private func beginDelete(_ profile: Profile) {
+        guard !profile.isDefault else { return }
         pendingDeleteSize = nil
         pendingDelete = profile
         let url = profile.dataDirectoryURL()

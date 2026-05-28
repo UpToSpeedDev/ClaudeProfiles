@@ -93,10 +93,12 @@ struct ProfileDetailView: View {
 
             Spacer()
 
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("Delete Profile", systemImage: "trash")
+            if !profile.isDefault {
+                Button(role: .destructive) {
+                    onDelete()
+                } label: {
+                    Label("Delete Profile", systemImage: "trash")
+                }
             }
         }
     }
@@ -129,10 +131,12 @@ struct ProfileDetailView: View {
                 } label: {
                     Label("Reveal in Finder", systemImage: "folder")
                 }
-                Button {
-                    NSWorkspace.shared.open(profile.logFileURL())
-                } label: {
-                    Label("Open Log", systemImage: "doc.text")
+                if !profile.isDefault {
+                    Button {
+                        NSWorkspace.shared.open(profile.logFileURL())
+                    } label: {
+                        Label("Open Log", systemImage: "doc.text")
+                    }
                 }
                 Button {
                     Task { await recomputeDiskUsage() }

@@ -32,6 +32,18 @@ enum Paths {
         return url
     }
 
+    /// The data directory Claude.app uses when launched normally (no `--user-data-dir`).
+    static var defaultClaudeDataDirectory: URL {
+        let base = try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        return (base ?? URL(fileURLWithPath: NSHomeDirectory()).appending(path: "Library/Application Support"))
+            .appending(path: "Claude", directoryHint: .isDirectory)
+    }
+
     private static func ensureDirectory(_ url: URL) {
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
     }

@@ -23,12 +23,16 @@ struct Profile: Identifiable, Codable, Hashable {
         }
     }
 
+    /// Stable ID for the built-in profile that points at Claude.app's normal data directory.
+    static let defaultProfileID = UUID(uuidString: "00000000-0000-0000-0000-0000000000DE")!
+
     let id: UUID
     var name: String
     var tint: Tint
     var dataDirectoryName: String
     var createdAt: Date
     var lastLaunchedAt: Date?
+    var isDefault: Bool
 
     init(
         id: UUID = UUID(),
@@ -36,7 +40,8 @@ struct Profile: Identifiable, Codable, Hashable {
         tint: Tint = .blue,
         dataDirectoryName: String? = nil,
         createdAt: Date = Date(),
-        lastLaunchedAt: Date? = nil
+        lastLaunchedAt: Date? = nil,
+        isDefault: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -44,10 +49,36 @@ struct Profile: Identifiable, Codable, Hashable {
         self.dataDirectoryName = dataDirectoryName ?? id.uuidString
         self.createdAt = createdAt
         self.lastLaunchedAt = lastLaunchedAt
+        self.isDefault = isDefault
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        tint = try c.decode(Tint.self, forKey: .tint)
+        dataDirectoryName = try c.decode(String.self, forKey: .dataDirectoryName)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        lastLaunchedAt = try c.decodeIfPresent(Date.self, forKey: .lastLaunchedAt)
+        isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault) ?? false
+    }
+
+    static func makeDefault() -> Profile {
+        Profile(
+            id: defaultProfileID,
+            name: "Default",
+            tint: .gray,
+            dataDirectoryName: "__default__",
+            createdAt: Date(),
+            isDefault: true
+        )
     }
 
     func dataDirectoryURL() -> URL {
-        Paths.profilesDataRoot.appending(path: dataDirectoryName, directoryHint: .isDirectory)
+        if isDefault {
+            return Paths.defaultClaudeDataDirectory
+        }
+        return Paths.profilesDataRoot.appending(path: dataDirectoryName, directoryHint: .isDirectory)
     }
 
     func logFileURL() -> URL {
