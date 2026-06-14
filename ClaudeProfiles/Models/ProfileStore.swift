@@ -1,6 +1,17 @@
 import Foundation
 import Observation
 
+enum DefaultSwapError: LocalizedError {
+    case moveFailed(Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .moveFailed(let underlying):
+            return "Couldn't swap the data directories: \(underlying.localizedDescription)"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class ProfileStore {
@@ -45,6 +56,62 @@ final class ProfileStore {
         var copy = profile
         copy.tint = tint
         update(copy)
+    }
+
+    /// Transfers the Default role to `target` by physically swapping its data directory with the
+    /// native Claude data directory, so launching plain Claude.app opens `target`'s data. The
+    /// previous default's data is preserved in `target`'s former isolated slot. Only the
+    /// `isDefault` badge moves; names stay with their data.
+    ///
+    /// Contract: the caller must ensure both the current default's and `target`'s Claude
+    /// instances are quit first — moving a data directory out from under a live Claude corrupts it.
+    func setDefault(_ target: Profile) throws {
+        guard !target.isDefault else { return }
+        guard let curIdx = profiles.firstIndex(where: { $0.isDefault }),
+              let tgtIdx = profiles.firstIndex(where: { $0.id == target.id }) else { return }
+
+        var current = profiles[curIdx]
+        var newDefault = profiles[tgtIdx]
+
+        let fm = FileManager.default
+        let nativeDir = Paths.defaultClaudeDataDirectory            // holds current's data (N)
+        let targetDir = newDefault.dataDirectoryURL()               // …/data/<tgtOldName> holds T
+        try? fm.createDirectory(at: nativeDir, withIntermediateDirectories: true)
+        try? fm.createDirectory(at: targetDir, withIntermediateDirectories: true)
+
+        // Same-volume renames (atomic, O(1)). Temp lives under profilesDataRoot.
+        let tmp = Paths.profilesDataRoot.appending(path: ".swap-\(UUID().uuidString)", directoryHint: .isDirectory)
+        do {
+            try fm.moveItem(at: nativeDir, to: tmp)                 // native → tmp (= N)
+            do {
+                try fm.moveItem(at: targetDir, to: nativeDir)      // target → native (native = T)
+            } catch {
+                try? fm.moveItem(at: tmp, to: nativeDir)           // rollback: native = N
+                throw DefaultSwapError.moveFailed(error)
+            }
+            do {
+                try fm.moveItem(at: tmp, to: targetDir)            // tmp → target slot (targetDir = N)
+            } catch {
+                try? fm.moveItem(at: nativeDir, to: targetDir)     // rollback: targetDir = T
+                try? fm.moveItem(at: tmp, to: nativeDir)           //           native = N
+                throw DefaultSwapError.moveFailed(error)
+            }
+        } catch let error as DefaultSwapError {
+            throw error
+        } catch {
+            throw DefaultSwapError.moveFailed(error)
+        }
+
+        // Swap the two directory-name strings + the badge. ("__default__" ⇄ <tgtOldName>.)
+        let curOldName = current.dataDirectoryName                  // "__default__"
+        current.isDefault = false
+        current.dataDirectoryName = newDefault.dataDirectoryName    // → …/data/<tgtOldName> (= N)
+        newDefault.isDefault = true
+        newDefault.dataDirectoryName = curOldName                   // "__default__" (ignored while default)
+
+        profiles[curIdx] = current
+        profiles[tgtIdx] = newDefault
+        save()
     }
 
     func markLaunched(_ profile: Profile, at date: Date = Date()) {

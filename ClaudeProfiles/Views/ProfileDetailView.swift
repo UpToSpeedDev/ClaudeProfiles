@@ -5,6 +5,7 @@ struct ProfileDetailView: View {
     let store: ProfileStore
     let launcher: ProfileLauncher
     let onDelete: () -> Void
+    let onMakeDefault: () -> Void
 
     @State private var diskUsage: Int64? = nil
     @State private var lastError: String? = nil
@@ -45,6 +46,14 @@ struct ProfileDetailView: View {
                 .frame(width: 28, height: 28)
             Text(profile.name)
                 .font(.largeTitle.weight(.semibold))
+            if profile.isDefault {
+                Label("Default", systemImage: "star.fill")
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(.orange)
+                    .font(.callout)
+                    .padding(.leading, 8)
+                    .help("Launching plain Claude opens this profile's data.")
+            }
             if launcher.isRunning(profile) {
                 Label("Running", systemImage: "circle.fill")
                     .labelStyle(.titleAndIcon)
@@ -94,6 +103,13 @@ struct ProfileDetailView: View {
             Spacer()
 
             if !profile.isDefault {
+                Button {
+                    onMakeDefault()
+                } label: {
+                    Label("Make Default", systemImage: "star")
+                }
+                .help("Swap this profile's data with Claude's default data directory, so launching plain Claude opens it.")
+
                 Button(role: .destructive) {
                     onDelete()
                 } label: {

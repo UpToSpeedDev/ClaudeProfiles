@@ -6,6 +6,7 @@ struct ProfileListView: View {
     @Binding var selection: Profile.ID?
     let onAdd: () -> Void
     let onDelete: (Profile) -> Void
+    let onMakeDefault: (Profile) -> Void
 
     var body: some View {
         List(selection: $selection) {
@@ -24,6 +25,10 @@ struct ProfileListView: View {
                             }
                         }
                         Divider()
+                        if !profile.isDefault {
+                            Button("Make Default") { onMakeDefault(profile) }
+                            Divider()
+                        }
                         Button("Reveal Data in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([profile.dataDirectoryURL()])
                         }
@@ -76,6 +81,12 @@ private struct ProfileRow: View {
                 .frame(width: 12, height: 12)
             Text(profile.name)
                 .lineLimit(1)
+            if profile.isDefault {
+                Image(systemName: "star.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .help("Default profile")
+            }
             Spacer()
             if isRunning {
                 Circle()

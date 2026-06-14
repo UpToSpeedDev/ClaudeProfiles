@@ -72,7 +72,7 @@ private struct MenuBarContent: View {
                     }
                 } label: {
                     Label {
-                        Text(profile.name)
+                        Text(profile.isDefault ? "\(profile.name) ★" : profile.name)
                     } icon: {
                         // NSMenu strips foregroundStyle from SF Symbols (template rendering),
                         // so use a non-template NSImage to keep the tint visible.
