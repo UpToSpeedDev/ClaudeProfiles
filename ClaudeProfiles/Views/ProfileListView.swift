@@ -41,6 +41,9 @@ struct ProfileListView: View {
                         }
                     }
             }
+            .onMove { source, destination in
+                store.move(fromOffsets: source, toOffset: destination)
+            }
         }
         .listStyle(.sidebar)
         .toolbar {

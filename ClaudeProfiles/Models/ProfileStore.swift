@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 
 enum DefaultSwapError: LocalizedError {
     case moveFailed(Error)
@@ -37,6 +38,12 @@ final class ProfileStore {
         profiles.append(profile)
         save()
         return profile
+    }
+
+    /// Reorders profiles in the sidebar. The new order is persisted as the array order.
+    func move(fromOffsets source: IndexSet, toOffset destination: Int) {
+        profiles.move(fromOffsets: source, toOffset: destination)
+        save()
     }
 
     func update(_ profile: Profile) {
